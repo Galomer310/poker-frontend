@@ -5,13 +5,30 @@ import { cardMap, displayValue } from "../utils/cards";
 
 const suitColor = (s: string) => (s === "♥" || s === "♦" ? "red" : "black");
 
+type WinnerPayload =
+  | { result: "draw" }
+  | {
+      result: "win";
+      winner: { id: number; name: string };
+      loser: { id: number; name: string };
+    };
+
 const GameBoard: React.FC = () => {
   const [gameData, setGameData] = useState<any>(null);
   const [drawnCard, setDrawnCard] = useState<number | null>(null);
-  const [winner, setWinner] = useState<string | null>(null);
+  const [winner, setWinner] = useState<WinnerPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
+  const [offerFrom, setOfferFrom] = useState<string | null>(null);
+  const [deadline, setDeadline] = useState<number | null>(null); // NEW
   const nav = useNavigate();
+
+  /* countdown ticker */
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => deadline && forceTick((x) => x + 1), 250);
+    return () => clearInterval(id);
+  }, [deadline]);
 
   /* ───────── socket bootstrap ───────── */
   useEffect(() => {
@@ -22,20 +39,23 @@ const GameBoard: React.FC = () => {
       .on("board", (d) => {
         setGameData(d);
         setDrawnCard(d.drawnCard);
+        if (!d.gameOver) setWinner(null); // banner clears on new game
       })
       .on("drawn-card", (c: number) => setDrawnCard(c))
-      .on("winner", (id: string) => setWinner(id))
-      .on("game-error", (msg: string) => setError(msg));
+      .on("winner", (payload: WinnerPayload) => setWinner(payload))
+      .on("game-error", (msg: string) => setError(msg))
+      .on("restart-offer", ({ from }) => setOfferFrom(from))
+      .on("restart-declined", () => {
+        alert("Opponent declined rematch – returning to lobby.");
+        exit();
+      })
+      .on("turn-start", ({ deadline }: { deadline: number }) => {
+        setDeadline(deadline);
+      });
 
     socket.emit("request-board");
-
     return () => {
-      socket
-        .off("connect")
-        .off("board")
-        .off("drawn-card")
-        .off("winner")
-        .off("game-error");
+      socket.removeAllListeners();
     };
   }, []);
 
@@ -46,20 +66,35 @@ const GameBoard: React.FC = () => {
   /* ids & helpers */
   const youId = playerId;
   const oppId = Object.keys(gameData.board).find((i) => i !== youId)!;
-
   const youName = gameData.usernames?.[youId] ?? "You";
   const oppName = gameData.usernames?.[oppId] ?? "Opponent";
   const yourTurn = gameData.currentActivePlayer === youId;
 
-  /* smallest column length = current row (0‑4) */
+  /* current row rule */
   const currentRow = Math.min(
-    ...(gameData.board[youId] as (number | null)[][]).map((col) => col.length)
+    ...(gameData.board[youId] as (number | null)[][]).map(
+      (c: (number | null)[]) => c.length
+    )
   );
+
+  /* secs left */
+  const secsLeft =
+    deadline && deadline > Date.now()
+      ? Math.ceil((deadline - Date.now()) / 1000)
+      : 0;
 
   /* ───────── render helpers ───────── */
   const visibleCard = (c: number | null, k: number) =>
     c === null ? (
-      <div key={k} style={{ width: 40, height: 60 }} />
+      <div
+        key={k}
+        style={{
+          width: 40,
+          height: 60,
+          border: "1px solid #aaa",
+          margin: "2px 0",
+        }}
+      />
     ) : (
       <div
         key={k}
@@ -72,6 +107,7 @@ const GameBoard: React.FC = () => {
           alignItems: "center",
           justifyContent: "center",
           color: suitColor(cardMap[c].suit),
+          margin: "2px 0",
         }}
       >
         {cardMap[c].suit}
@@ -84,7 +120,7 @@ const GameBoard: React.FC = () => {
       key={k}
       src="/card-back.png"
       alt="Hidden"
-      style={{ width: 40, height: 60, borderRadius: 4 }}
+      style={{ width: 40, height: 60, borderRadius: 4, margin: "2px 0" }}
     />
   );
 
@@ -95,7 +131,11 @@ const GameBoard: React.FC = () => {
     socket.emit("place-card", { column: col });
     setDrawnCard(null);
   };
-  const restart = () => socket.emit("restart-game");
+  const restart = () => socket.emit("restart-request");
+  const respond = (ans: boolean) => {
+    setOfferFrom(null);
+    socket.emit("restart-response", ans);
+  };
   const exit = () => {
     socket.emit("exit-game");
     setTimeout(() => {
@@ -124,6 +164,9 @@ const GameBoard: React.FC = () => {
           {gameData.usernames?.[gameData.currentActivePlayer] ??
             gameData.currentActivePlayer}
         </span>
+        {secsLeft > 0 && (
+          <span style={{ marginLeft: 8, fontWeight: 600 }}>({secsLeft})</span>
+        )}
       </p>
       <p>
         <strong>Drawn Card:</strong>{" "}
@@ -135,25 +178,29 @@ const GameBoard: React.FC = () => {
       </p>
 
       {winner && (
-        <h2 style={{ color: "green", marginTop: 16 }}>
-          {winner === "draw"
-            ? "Draw!"
-            : `Winner: ${
-                winner === youId
-                  ? youName
-                  : gameData.usernames?.[winner] ?? winner
-              }`}
-        </h2>
+        <div style={{ marginTop: 16, lineHeight: 1.4 }}>
+          {winner.result === "draw" ? (
+            <h2 style={{ color: "green" }}>Draw!</h2>
+          ) : (
+            <>
+              <h2 style={{ color: "green" }}>
+                {winner.winner.name} wins (+2 points)
+              </h2>
+              <h3 style={{ color: "crimson" }}>
+                {winner.loser.name} loses (−2 points)
+              </h3>
+            </>
+          )}
+        </div>
       )}
 
-      {/* ─── Boards ─── */}
+      {/* boards */}
       <div style={{ marginTop: 32 }}>
-        {/* Opponent */}
         <h3>{oppName}</h3>
         <div style={{ display: "flex", gap: 16, justifyContent: "center" }}>
-          {(gameData.board[oppId] as (number | null)[][]).map((col, i) => (
+          {(gameData.board[oppId] as (number | null)[][]).map((col, ci) => (
             <div
-              key={i}
+              key={ci}
               style={{
                 minWidth: 60,
                 padding: 5,
@@ -161,21 +208,18 @@ const GameBoard: React.FC = () => {
                 borderRadius: 4,
               }}
             >
-              {col.map((card, rowIdx) =>
-                rowIdx === 4
-                  ? hiddenCard(rowIdx) // hide 5‑th row
-                  : visibleCard(card, rowIdx)
+              {col.map((card, ri) =>
+                ri === 4 ? hiddenCard(ri) : visibleCard(card, ri)
               )}
             </div>
           ))}
         </div>
 
-        {/* You */}
         <h3 style={{ marginTop: 24 }}>{youName}</h3>
         <div style={{ display: "flex", gap: 16, justifyContent: "center" }}>
-          {(gameData.board[youId] as (number | null)[][]).map((col, i) => (
+          {(gameData.board[youId] as (number | null)[][]).map((col, ci) => (
             <div
-              key={i}
+              key={ci}
               style={{
                 minWidth: 60,
                 padding: 5,
@@ -183,10 +227,9 @@ const GameBoard: React.FC = () => {
                 borderRadius: 4,
               }}
             >
-              {col.map((card, rowIdx) => visibleCard(card, rowIdx))}
-              {/* place button enabled only if this column belongs to current row */}
+              {col.map((card, ri) => visibleCard(card, ri))}
               <button
-                onClick={() => place(i)}
+                onClick={() => place(ci)}
                 disabled={
                   drawnCard === null ||
                   col.length >= 5 ||
@@ -207,9 +250,27 @@ const GameBoard: React.FC = () => {
         <button onClick={draw} disabled={!yourTurn || drawnCard !== null}>
           Draw
         </button>
-        <button onClick={restart} style={{ marginLeft: 16 }}>
-          🔁 Restart
-        </button>
+
+        {offerFrom ? (
+          <>
+            <span style={{ marginLeft: 16 }}>{offerFrom} wants a rematch:</span>
+            <button onClick={() => respond(true)} style={{ marginLeft: 8 }}>
+              Yes
+            </button>
+            <button onClick={() => respond(false)} style={{ marginLeft: 8 }}>
+              No
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={restart}
+            disabled={!winner}
+            style={{ marginLeft: 16 }}
+          >
+            🔁 Rematch?
+          </button>
+        )}
+
         <button onClick={exit} style={{ marginLeft: 16, color: "red" }}>
           ❌ Exit
         </button>
