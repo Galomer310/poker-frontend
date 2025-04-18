@@ -220,3 +220,24 @@ body {
 .game-controls .btn + .btn {
   margin-left: 1rem;
 }
+
+
+/* ------------------------------------------------------------------ */
+/*  Misc. single–page helpers                                         */
+/* ------------------------------------------------------------------ */
+.under-wrapper {
+  text-align: center;
+  margin-top: 5rem;
+}
+
+.back-btn {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  cursor: pointer;
+  z-index: 1200;
+}
+
+.mt-24 {
+  margin-top: 24px;
+}

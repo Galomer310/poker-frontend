@@ -32,7 +32,7 @@ const Lobby = () => {
       <h2>Welcome, {username}!</h2>
       <h3>You Have: {credits} Credit Points</h3>
       <div className="chinese-poker-wrapper">
-        <p>Play Chinese Poker </p>
+        <p>Play Chinese Poker 5 Cards 🃜🃚🃖🃁🂭🂺</p>
         <button className="btn" onClick={joinOneVsOne}>
           1 Vs 1
         </button>
