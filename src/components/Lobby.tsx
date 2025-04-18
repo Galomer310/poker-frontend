@@ -29,19 +29,18 @@ const Lobby = () => {
 
   return (
     <div className="lobby-wrapper">
-      <h2>
-        Welcome, {username}! — Credits: {credits}
-      </h2>
+      <h2>Welcome, {username}!</h2>
+      <h3>You Have: {credits} Credit Points</h3>
+      <div className="chinese-poker-wrapper">
+        <p>Play Chinese Poker </p>
+        <button className="btn" onClick={joinOneVsOne}>
+          1 Vs 1
+        </button>
 
-      <p>1 v 1 costs 2 credits, winner +2&nbsp;|&nbsp;loser −2</p>
-
-      <button className="btn" onClick={joinOneVsOne}>
-        1 vs 1
-      </button>
-
-      <button className="btn" onClick={() => nav("/under-construction")}>
-        4 players
-      </button>
+        <button className="btn" onClick={() => nav("/under-construction")}>
+          4 players
+        </button>
+      </div>
     </div>
   );
 };

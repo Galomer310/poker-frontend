@@ -135,6 +135,14 @@ body {
   margin-left: 1rem;
 }
 
+.chinese-poker-wrapper {
+  max-width: 360px;
+  margin: 4rem auto;
+  padding: 2.2rem 2.6rem;
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0 0 0 / 0.08);
+}
 /* ------------------------------------------------------------------ */
 /*  Game board                                                        */
 /* ------------------------------------------------------------------ */
