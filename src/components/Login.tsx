@@ -19,7 +19,7 @@ const Login = () => {
     try {
       const { data } = await api.post("/api/auth/login", form);
       dispatch(loginSuccess({ ...data.user, token: data.token }));
-      connectSocket(data.user.id, data.token); // open socket
+      connectSocket(data.user.id, data.token, data.user.username);
       nav("/"); // lobby
     } catch (e: any) {
       setErr(e.response?.data?.msg || "Error");

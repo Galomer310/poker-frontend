@@ -1,19 +1,19 @@
-// src/socket.ts
 import { io } from "socket.io-client";
 
-/**
- * Create a singleton Socket.IO client instance.
- * We disable autoConnect because we want to connect manually after login.
- */
+/** singleton Socket.IO instance (manual connect) */
 export const socket = io("http://localhost:4000", { autoConnect: false });
 
 /**
- * Connects the socket with the given authentication information.
- *
- * @param userId - The authenticated user's ID.
- * @param token - The authentication token (e.g., JWT).
+ * Connect after login
+ * @param userId   numeric db id
+ * @param token    JWT
+ * @param username display name
  */
-export function connectSocket(userId: number, token: string) {
-  socket.auth = { userId, token };
+export function connectSocket(
+  userId: number,
+  token: string,
+  username: string
+) {
+  socket.auth = { userId, token, username };
   socket.connect();
 }
