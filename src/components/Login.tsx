@@ -20,29 +20,33 @@ const Login = () => {
       const { data } = await api.post("/api/auth/login", form);
       dispatch(loginSuccess({ ...data.user, token: data.token }));
       connectSocket(data.user.id, data.token, data.user.username);
-      nav("/"); // lobby
+      nav("/");
     } catch (e: any) {
       setErr(e.response?.data?.msg || "Error");
     }
   };
 
   return (
-    <div style={{ maxWidth: 350, margin: "3rem auto" }}>
+    <div className="auth-wrapper">
       <h2>Login</h2>
+
       <input name="email" placeholder="email" onChange={handle} />
       <input
         name="password"
         type="password"
         placeholder="password"
         onChange={handle}
-        style={{ marginTop: 8 }}
       />
-      <button onClick={submit} style={{ marginTop: 12 }}>
+
+      <button className="btn" onClick={submit}>
         Sign in
       </button>
-      {err && <p style={{ color: "red" }}>{err}</p>}
+
+      {err && <p className="auth-error">{err}</p>}
+
       <Link to="/register">Need an account? Register</Link>
     </div>
   );
 };
+
 export default Login;

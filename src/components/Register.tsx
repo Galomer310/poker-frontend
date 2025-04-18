@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import api from "../api"; // axios instance with baseURL 4000
+import api from "../api";
 
 const Register = () => {
   const nav = useNavigate();
@@ -21,8 +21,9 @@ const Register = () => {
   };
 
   return (
-    <div style={{ maxWidth: 350, margin: "3rem auto" }}>
+    <div className="auth-wrapper">
       <h2>Register</h2>
+
       {["username", "email", "password"].map((f) => (
         <input
           key={f}
@@ -30,13 +31,18 @@ const Register = () => {
           placeholder={f}
           type={f === "password" ? "password" : "text"}
           onChange={handle}
-          style={{ display: "block", width: "100%", marginBottom: 8 }}
         />
       ))}
-      <button onClick={submit}>Create account</button>
-      {err && <p style={{ color: "red" }}>{err}</p>}
+
+      <button className="btn" onClick={submit}>
+        Create account
+      </button>
+
+      {err && <p className="auth-error">{err}</p>}
+
       <Link to="/login">Already have an account? Login</Link>
     </div>
   );
 };
+
 export default Register;
