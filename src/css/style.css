@@ -212,6 +212,16 @@ body {
   color: var(--clr-danger);
 }
 
+/* active player visual tweaks */
+.active-player {
+  font-weight: 700;
+}
+
+.active-player.red {
+  color: red;
+}
+
+
 /* footer buttons */
 .game-controls {
   margin-top: 2rem;

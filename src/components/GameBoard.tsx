@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useDispatch } from "react-redux";
+import { updateCredits } from "../store/authSlice";
 import { socket } from "../socket";
 import { cardMap, displayValue } from "../utils/cards";
 
-/* helper: red for hearts / diamonds */
 const suitColor = (s: string) => (s === "♥" || s === "♦" ? "red" : "black");
 
-/* winner payload the server emits */
-type WinnerPayload =
+type Winner =
   | { result: "draw" }
   | {
       result: "win";
@@ -15,235 +15,253 @@ type WinnerPayload =
       loser: { id: number; name: string };
     };
 
+type ColRes = {
+  handYou: string | null;
+  handOpp: string | null;
+  youWin: boolean | null; // null = draw
+};
+
+const emptyRes = (): Record<number, ColRes> => ({
+  0: { handYou: null, handOpp: null, youWin: null },
+  1: { handYou: null, handOpp: null, youWin: null },
+  2: { handYou: null, handOpp: null, youWin: null },
+  3: { handYou: null, handOpp: null, youWin: null },
+  4: { handYou: null, handOpp: null, youWin: null },
+});
+
 const GameBoard: React.FC = () => {
-  /* ---------- local state ---------- */
-  const [gameData, setGameData] = useState<any>(null);
-  const [drawnCard, setDrawnCard] = useState<number | null>(null);
-  const [winner, setWinner] = useState<WinnerPayload | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [playerId, setPlayerId] = useState<string | null>(null);
-  const [offerFrom, setOfferFrom] = useState<string | null>(null);
-  const [deadline, setDeadline] = useState<number | null>(null); // turn timer
+  const [data, setData] = useState<any>(null);
+  const [drawn, setDrawn] = useState<number | null>(null);
+  const [winner, setWinner] = useState<Winner | null>(null);
+  const [exitMsg, setExitMsg] = useState<string | null>(null);
+  const [youId, setYouId] = useState<string | null>(null);
+  const [moveDL, setMoveDL] = useState<number | null>(null);
+  const [rematchDL, setRematchDL] = useState<number | null>(null);
+  const [colRes, setColRes] = useState<Record<number, ColRes>>(emptyRes());
 
-  const nav = useNavigate();
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
 
-  /* force re‑render every 250 ms to keep countdown smooth */
-  const [, forceTick] = useState(0);
+  /* force re-render */
+  const [, force] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => deadline && forceTick((x) => x + 1), 250);
+    const id = setInterval(() => force((x) => x + 1), 250);
     return () => clearInterval(id);
-  }, [deadline]);
+  }, []);
 
-  /* ---------- socket bootstrap ---------- */
   useEffect(() => {
-    if (socket.connected) setPlayerId(socket.id ?? null);
-    socket.on("connect", () => setPlayerId(socket.id ?? null));
+    if (socket.connected) setYouId(socket.id ?? null);
+    socket.on("connect", () => setYouId(socket.id ?? null));
 
     socket
       .on("board", (d) => {
-        setGameData(d);
-        setDrawnCard(d.drawnCard);
-        if (!d.gameOver) setWinner(null); // clear banner on fresh game
+        setData(d);
+        setDrawn(d.drawnCard);
+        if (!d.gameOver) {
+          setWinner(null);
+          setExitMsg(null);
+          setColRes(emptyRes());
+          setRematchDL(null);
+        }
       })
-      .on("drawn-card", (c: number) => setDrawnCard(c))
-      .on("winner", (payload: WinnerPayload) => setWinner(payload))
-      .on("game-error", (msg: string) => setError(msg))
-      .on("restart-offer", ({ from }) => setOfferFrom(from))
-      .on("restart-declined", () => {
-        alert("Opponent declined rematch – returning to lobby.");
-        exitGame();
-      })
-      .on("turn-start", (d: { player: string; deadline: number }) =>
-        setDeadline(d.deadline)
-      );
+      .on("drawn-card", setDrawn)
+      .on("winner", (w: Winner) => setWinner(w))
+      .on("player-exited", ({ message }) => setExitMsg(message))
+      .on("turn-start", ({ deadline }) => setMoveDL(deadline))
+      .on("credits-sync", ({ newCredits }) =>
+        dispatch(updateCredits(newCredits))
+      )
+      .on(
+        "column-result",
+        ({
+          column,
+          p1,
+          p2,
+          winnerId,
+        }: {
+          column: number;
+          p1: { id: string; hand: string };
+          p2: { id: string; hand: string };
+          winnerId: string | "draw";
+        }) => {
+          setColRes((prev) => {
+            const youHand = p1.id === youId ? p1.hand : p2.hand;
+            const oppHand = p1.id === youId ? p2.hand : p1.hand;
+            const youWin =
+              winnerId === "draw" ? null : winnerId === youId ? true : false;
+            return {
+              ...prev,
+              [column]: { handYou: youHand, handOpp: oppHand, youWin },
+            };
+          });
+        }
+      )
+      .on("rematch-countdown", ({ deadline }) => setRematchDL(deadline));
 
     socket.emit("request-board");
     return () => {
       socket.removeAllListeners();
     };
-  }, []);
+  }, [dispatch, youId]);
 
-  /* ---------- guards ---------- */
-  if (error) return <div>Error: {error}</div>;
-  if (!gameData || !playerId) return <div>Loading game...</div>;
+  if (!data || !youId) return <div>Loading…</div>;
 
-  /* ---------- derived IDs & helpers ---------- */
-  const yourId = playerId;
-  const oppId = Object.keys(gameData.board).find((i) => i !== yourId)!;
-
-  const youName = gameData.usernames?.[yourId] ?? "You";
-  const oppName = gameData.usernames?.[oppId] ?? "Opponent";
-
-  const yourTurn = gameData.currentActivePlayer === yourId;
-
-  /* row restriction for “Place” button */
-  const currentRow = Math.min(
-    ...(gameData.board[yourId] as (number | null)[][]).map((c) => c.length)
-  );
-
-  /* countdown seconds */
+  const oppId = Object.keys(data.board).find((i) => i !== youId)!;
+  const youName = data.usernames?.[youId] ?? "You";
+  const oppName = data.usernames?.[oppId] ?? "Opponent";
+  const yourTurn = data.currentActivePlayer === youId;
   const secsLeft =
-    deadline && deadline > Date.now()
-      ? Math.ceil((deadline - Date.now()) / 1000)
+    moveDL && moveDL > Date.now() ? Math.ceil((moveDL - Date.now()) / 1000) : 0;
+  const secsRematch =
+    rematchDL && rematchDL > Date.now()
+      ? Math.ceil((rematchDL - Date.now()) / 1000)
       : 0;
 
-  /* ---------- handlers ---------- */
-  const draw = () => socket.emit("draw-card");
-  const place = (col: number) => {
-    if (drawnCard === null) return;
-    socket.emit("place-card", { column: col });
-    setDrawnCard(null);
+  const colsOpp = data.board[oppId] as (number | null)[][];
+  const colsYou = data.board[youId] as (number | null)[][];
+  const rowNeeded = Math.min(
+    ...colsYou.map((col) => col.filter((c) => c !== null).length)
+  );
+
+  const place = (position: number) => {
+    if (drawn === null) return;
+    socket.emit("place-card", { position });
+    setDrawn(null);
   };
-  const sendRestartRequest = () => socket.emit("restart-request");
-  const respondRestart = (agree: boolean) => {
-    socket.emit("restart-response", agree);
-    setOfferFrom(null);
-  };
-  const exitGame = () => {
+  const exit = () => {
+    if (!window.confirm("Exit game?")) return;
     socket.emit("exit-game");
     setTimeout(() => {
       socket.disconnect();
-      nav("/");
+      navigate("/");
     }, 200);
   };
 
-  /* ---------- render helpers ---------- */
-  /* visible card div */
-  const cardDiv = (card: number | null, key: React.Key) =>
-    card === null ? (
-      <div key={key} className="card-box card-hidden" />
-    ) : (
-      <div
-        key={key}
-        className="card-box"
-        style={{ color: suitColor(cardMap[card].suit) }}
-      >
-        {cardMap[card].suit}
-        {displayValue(cardMap[card].value)}
+  const cardDiv = (c: number | null, k: React.Key) => {
+    if (c === null) return <div key={k} className="card-box card-hidden" />;
+    const m = cardMap[c];
+    return (
+      <div key={k} className="card-box" style={{ color: suitColor(m.suit) }}>
+        {m.suit}
+        {displayValue(m.value)}
       </div>
     );
+  };
 
-  /* ---------- JSX ---------- */
+  /* column box helper */
+  const colBox = (
+    col: (number | null)[],
+    ci: number,
+    player: "you" | "opp"
+  ) => {
+    const res = colRes[ci];
+    const showNames = winner !== null; // display names only after game over
+    const winBorder =
+      showNames &&
+      res.handYou &&
+      res.handOpp &&
+      res.youWin !== null &&
+      ((player === "you" && res.youWin) || (player === "opp" && !res.youWin))
+        ? "border-2 border-green-400"
+        : "";
+
+    const handText =
+      player === "you"
+        ? res.handYou && showNames
+          ? res.handYou
+          : "…"
+        : res.handOpp && showNames
+        ? res.handOpp
+        : "…";
+
+    return (
+      <div
+        key={ci}
+        className={`column-box flex flex-col items-center ${winBorder}`}
+      >
+        {col.map((card, ri) => cardDiv(card, ri))}
+        {player === "you" && (
+          <button
+            className="btn btn-sm mt-1"
+            onClick={() => place(ci)}
+            disabled={
+              drawn === null ||
+              !yourTurn ||
+              col.filter((c) => c !== null).length !== rowNeeded
+            }
+          >
+            Place
+          </button>
+        )}
+        <div className="text-xs mt-1">{handText}</div>
+      </div>
+    );
+  };
+
   return (
-    <div className="game-container">
-      <h1 className="game-title">Game in Progress</h1>
+    <div className="game-container flex flex-col h-full justify-between p-4">
+      {/* Opponent hand */}
+      <div className="opponent-board mb-6">
+        <h3 className="text-center mb-2">{oppName}</h3>
+        <div className="board-grid grid grid-cols-5 gap-2 justify-center">
+          {colsOpp.map((col, ci) => colBox(col, ci, "opp"))}
+        </div>
+      </div>
 
-      <p>
-        <strong>Active:</strong>{" "}
-        <span className="active-player">
-          {gameData.usernames?.[gameData.currentActivePlayer] ??
-            gameData.currentActivePlayer}
-        </span>
-        {secsLeft > 0 && <span className="countdown">({secsLeft})</span>}
-      </p>
+      {/* Drawn card + timer */}
+      <div className="center-control flex items-center justify-center space-x-4 my-6">
+        <div className="drawn-card">
+          {drawn !== null ? (
+            cardDiv(drawn, "drawn")
+          ) : (
+            <div className="card-box card-hidden" />
+          )}
+        </div>
+        <div className="countdown-banner text-xl font-bold">
+          {secsLeft > 0 ? secsLeft : ""}
+        </div>
+      </div>
 
-      <p style={{ marginTop: 10 }}>
-        <strong>Drawn Card:</strong>{" "}
-        {drawnCard !== null
-          ? `${cardMap[drawnCard].suit}${displayValue(
-              cardMap[drawnCard].value
-            )}`
-          : "None"}
-      </p>
+      {/* Your hand */}
+      <div className="player-board mt-6">
+        <h3 className="text-center mb-2">{youName}</h3>
+        <div className="board-grid grid grid-cols-5 gap-2 justify-center">
+          {colsYou.map((col, ci) => colBox(col, ci, "you"))}
+        </div>
+      </div>
 
-      {/*  winner  */}
+      {/* Exit button */}
+      <div className="flex justify-center mt-6">
+        <button className="btn btn-danger" onClick={exit}>
+          ❌ Exit
+        </button>
+      </div>
+
+      {/* Result + rematch countdown */}
       {winner && (
-        <div className="winner-banner">
+        <div className="result-banner text-center mt-6">
           {winner.result === "draw" ? (
-            <h2>Draw!</h2>
+            <p className="text-xl font-bold">It&rsquo;s a draw!</p>
           ) : (
             <>
-              <h2>{winner.winner.name} wins (+2)</h2>
-              <h3>{winner.loser.name} loses (−2)</h3>
+              <p className="text-green-600 text-2xl font-bold">
+                Winner {winner.winner.name} +2 points
+              </p>
+              <p className="text-red-600 text-xl font-bold">
+                Lost {winner.loser.name} −2 points
+              </p>
             </>
+          )}
+          {secsRematch > 0 && (
+            <p className="mt-2 text-sm">Rematch starts in {secsRematch} s…</p>
           )}
         </div>
       )}
 
-      {/*  boards  */}
-      <div className="board-wrapper">
-        {/* Opponent */}
-        <h3 style={{ marginTop: 24 }}>{oppName}</h3>
-        <div className="board-grid">
-          {(gameData.board[oppId] as (number | null)[][]).map((col, ci) => (
-            <div key={ci} className="column-box">
-              {col.map((card, ri) =>
-                ri === 4 ? cardDiv(null, ri) : cardDiv(card, ri)
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* You */}
-        <h3 style={{ marginTop: 24 }}>{youName}</h3>
-        <div className="board-grid">
-          {(gameData.board[yourId] as (number | null)[][]).map((col, ci) => (
-            <div key={ci} className="column-box">
-              {col.map((card, ri) => cardDiv(card, ri))}
-              <button
-                className="btn"
-                onClick={() => place(ci)}
-                disabled={
-                  drawnCard === null ||
-                  col.length >= 5 ||
-                  !yourTurn ||
-                  col.length !== currentRow
-                }
-              >
-                Place
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* controls */}
-      <div className="game-controls">
-        <button
-          className="btn"
-          onClick={draw}
-          disabled={!yourTurn || drawnCard !== null}
-        >
-          Draw
-        </button>
-
-        {offerFrom ? (
-          <>
-            <span style={{ marginLeft: 12 }}>{offerFrom} wants a rematch:</span>
-            <button
-              className="btn"
-              onClick={() => respondRestart(true)}
-              style={{ marginLeft: 6 }}
-            >
-              Yes
-            </button>
-            <button
-              className="btn btn-danger"
-              onClick={() => respondRestart(false)}
-              style={{ marginLeft: 6 }}
-            >
-              No
-            </button>
-          </>
-        ) : (
-          <button
-            className="btn"
-            onClick={sendRestartRequest}
-            disabled={!winner}
-            style={{ marginLeft: 12 }}
-          >
-            🔁 Rematch
-          </button>
-        )}
-
-        <button
-          className="btn btn-danger"
-          onClick={exitGame}
-          style={{ marginLeft: 12 }}
-        >
-          ❌ Exit
-        </button>
-      </div>
+      {/* Opponent quit */}
+      {exitMsg && (
+        <p className="text-center text-lg text-red-600 mt-4">{exitMsg}</p>
+      )}
     </div>
   );
 };
