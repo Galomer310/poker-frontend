@@ -14,6 +14,7 @@ import Login from "./components/Login";
 import WaitingRoom from "./components/WaitingRoom";
 import GameBoard from "./components/GameBoard";
 import UnderConstruction from "./components/UnderConstruction";
+import GameRooms from "./components/GameRooms";
 
 /**
  * Private route component that renders children only if the user is authenticated.
@@ -53,6 +54,15 @@ const App: React.FC = () => {
             </Private>
           }
         />
+        <Route
+          path="/rooms"
+          element={
+            <Private>
+              <GameRooms />
+            </Private>
+          }
+        />
+
         <Route path="/under-construction" element={<UnderConstruction />} />
       </Routes>
     </Router>

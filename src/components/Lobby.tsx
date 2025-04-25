@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { socket, ensureSocketConnected } from "../socket";
 
 /**
- * Lobby — choose a 1 v 1 match.
+ * Lobby — choose a 1 v 1 quick match or browse custom rooms.
  */
 const Lobby = () => {
   const nav = useNavigate();
@@ -12,10 +12,9 @@ const Lobby = () => {
     (s: RootState) => s.auth
   );
 
-  /** join queue — reconnect first if user has returned from a finished game */
+  /** quick queue (unchanged) */
   const joinOneVsOne = () => {
     if (socket.disconnected) {
-      // reconnect, then emit once we’re connected
       socket.once("connect", () => {
         socket.emit("join-queue");
         nav("/waiting");
@@ -27,20 +26,30 @@ const Lobby = () => {
     }
   };
 
+  /** go to rooms page */
+  const goRooms = () => {
+    if (socket.disconnected) {
+      ensureSocketConnected(id!, token!, username!);
+      socket.once("connect", () => nav("/rooms"));
+    } else {
+      nav("/rooms");
+    }
+  };
+
   return (
     <div className="lobby-wrapper">
       <h2>Welcome, {username}!</h2>
       <h3>You Have: {credits} Credit Points</h3>
-      <div className="chinese-poker-wrapper">
-        <p>Play Chinese Poker 5 Cards 🃜🃚🃖🃁🂭🂺</p>
-        <button className="btn" onClick={joinOneVsOne}>
-          1 Vs 1
-        </button>
 
-        <button className="btn" onClick={() => nav("/under-construction")}>
-          4 players
-        </button>
-      </div>
+      <p className="mb-4">Play Chinese Poker 5 Cards 🃜🃚🃖🃁🂭🂺</p>
+
+      <button className="btn mb-2" onClick={joinOneVsOne}>
+        1 Vs 1 (Quick)
+      </button>
+
+      <button className="btn" onClick={goRooms}>
+        Rooms
+      </button>
     </div>
   );
 };
