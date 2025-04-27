@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useDispatch, useSelector } from "react-redux";
-import { RootState } from "../store";
+import { useDispatch } from "react-redux";
 import { updateCredits } from "../store/authSlice";
 import { socket } from "../socket";
 import { cardMap, displayValue } from "../utils/cards";
@@ -32,51 +31,44 @@ const emptyColRes = (): Record<number, ColRes> => ({
 });
 
 const GameBoard: React.FC = () => {
-  const { id: myDbId } = useSelector((s: RootState) => s.auth);
-
   const [data, setData] = useState<any>(null);
   const [drawn, setDrawn] = useState<number | null>(null);
   const [winner, setWinner] = useState<Winner | null>(null);
-  const [exitMsg, setExitMsg] = useState<string | null>(null);
   const [youId, setYouId] = useState<string | null>(null);
   const [moveDL, setMoveDL] = useState<number | null>(null);
   const [rematchDL, setRematchDL] = useState<number | null>(null);
   const [colRes, setColRes] = useState<Record<number, ColRes>>(emptyColRes());
 
-  const navigate = useNavigate();
+  const nav = useNavigate();
   const dispatch = useDispatch();
 
-  /* force small re-render every 250 ms for countdowns */
+  /*----------- render tick -----------*/
   const [, force] = useState(0);
   useEffect(() => {
     const t = setInterval(() => force((x) => x + 1), 250);
     return () => clearInterval(t);
   }, []);
 
-  /* sockets */
+  /*----------- sockets -----------*/
   useEffect(() => {
-    /* identify ourselves */
     if (socket.connected) setYouId(socket.id ?? null);
     socket.on("connect", () => setYouId(socket.id ?? null));
 
-    /* -------- tell server we’re on the board and ready -------- */
     socket.emit("player-ready");
-    /* ---------------------------------------------------------- */
 
     socket
       .on("board", (d) => {
         setData(d);
         setDrawn(d.drawnCard);
+        /* reset column names ONLY when a **new round** starts */
         if (!d.gameOver) {
           setWinner(null);
-          setExitMsg(null);
           setColRes(emptyColRes());
           setRematchDL(null);
         }
       })
       .on("drawn-card", setDrawn)
       .on("winner", (w: Winner) => setWinner(w))
-      .on("player-exited", ({ message }) => setExitMsg(message))
       .on("turn-start", ({ deadline }) => setMoveDL(deadline))
       .on("credits-sync", ({ newCredits }) =>
         dispatch(updateCredits(newCredits))
@@ -109,7 +101,6 @@ const GameBoard: React.FC = () => {
       .on("rematch-countdown", ({ deadline }) => setRematchDL(deadline));
 
     socket.emit("request-board");
-
     return () => {
       socket.offAny();
     };
@@ -117,7 +108,7 @@ const GameBoard: React.FC = () => {
 
   if (!data || !youId) return <div>Loading…</div>;
 
-  /* -------- derived values -------- */
+  /*----------- derived ----------*/
   const oppId = Object.keys(data.board).find((i) => i !== youId)!;
   const youName = data.usernames?.[youId] ?? "You";
   const oppName = data.usernames?.[oppId] ?? "Opponent";
@@ -136,7 +127,7 @@ const GameBoard: React.FC = () => {
     ...colsYou.map((c) => c.filter((x) => x !== null).length)
   );
 
-  /* -------- handlers -------- */
+  /*----------- event handlers -----------*/
   const draw = () => socket.emit("draw-card");
   const place = (col: number) => {
     if (drawn === null) return;
@@ -148,21 +139,24 @@ const GameBoard: React.FC = () => {
     socket.emit("exit-game");
     setTimeout(() => {
       socket.disconnect();
-      navigate("/");
+      nav("/");
     }, 200);
   };
 
-  /* -------- render helpers -------- */
-  const cardDiv = (c: number | null, k: React.Key) => {
-    if (c === null) return <div key={k} className="card-box card-hidden" />;
-    const m = cardMap[c];
-    return (
-      <div key={k} className="card-box" style={{ color: suitColor(m.suit) }}>
-        {m.suit}
-        {displayValue(m.value)}
+  /*----------- helper renders -----------*/
+  const cardDiv = (c: number | null, k: React.Key) =>
+    c === null ? (
+      <div key={k} className="card-box card-hidden" />
+    ) : (
+      <div
+        key={k}
+        className="card-box"
+        style={{ color: suitColor(cardMap[c].suit) }}
+      >
+        {cardMap[c].suit}
+        {displayValue(cardMap[c].value)}
       </div>
     );
-  };
 
   const colBox = (col: (number | null)[], ci: number, who: "you" | "opp") => {
     const res = colRes[ci];
@@ -178,10 +172,10 @@ const GameBoard: React.FC = () => {
       who === "you"
         ? showNames
           ? res.handYou ?? "?"
-          : "…"
+          : ""
         : showNames
         ? res.handOpp ?? "?"
-        : "…";
+        : "";
 
     return (
       <div
@@ -189,7 +183,7 @@ const GameBoard: React.FC = () => {
         className={`column-box flex flex-col items-center ${winBorder}`}
       >
         {col.map((card, ri) => cardDiv(card, ri))}
-        {who === "you" && (
+        {who === "you" && !winner && (
           <button
             className="btn btn-sm mt-1"
             onClick={() => place(ci)}
@@ -202,33 +196,31 @@ const GameBoard: React.FC = () => {
             Place
           </button>
         )}
-        <div className="text-xs mt-1">{handText}</div>
+        {showNames && <div className="text-xs mt-1">{handText}</div>}
       </div>
     );
   };
 
-  const banner = () => {
-    if (!winner) return null;
-    if (winner.result === "draw")
-      return <p className="text-xl font-bold">It&rsquo;s a draw!</p>;
-
-    const delta = winner.delta ?? 2;
-    return (
+  /*----------- central banner -----------*/
+  const banner = winner ? (
+    winner.result === "draw" ? (
+      <p className="text-xl font-bold">It&rsquo;s a draw!</p>
+    ) : (
       <>
         <p className="text-green-600 text-2xl font-bold">
-          Winner {winner.winner.name} +{delta} points
+          Winner {winner.winner.name} +{winner.delta} points
         </p>
         <p className="text-red-600 text-xl font-bold">
-          Lost {winner.loser.name} &minus;{delta} points
+          Lost {winner.loser.name} &minus;{winner.delta} points
         </p>
       </>
-    );
-  };
+    )
+  ) : null;
 
-  /* -------- UI -------- */
+  /*===========  JSX  ===========*/
   return (
-    <div className="game-container flex flex-col h-full justify-between p-4">
-      {/* opponent board */}
+    <div className="relative game-container flex flex-col h-full justify-between p-4">
+      {/* Opponent board */}
       <div className="opponent-board mb-6">
         <h3 className="text-center mb-2">{oppName}</h3>
         <div className="board-grid grid grid-cols-5 gap-2 justify-center">
@@ -236,13 +228,17 @@ const GameBoard: React.FC = () => {
         </div>
       </div>
 
-      {/* drawn card & turn timer */}
-      <div className="center-control flex items-center justify-center space-x-4 my-6">
-        {drawn !== null ? cardDiv(drawn, "drawn") : cardDiv(null, "blank")}
-        <div className="text-xl font-bold">{secsLeft > 0 ? secsLeft : ""}</div>
-      </div>
+      {/* Drawn card & turn timer (hidden once game ends) */}
+      {!winner && (
+        <div className="center-control flex items-center justify-center space-x-4 my-6">
+          {drawn !== null ? cardDiv(drawn, "drawn") : cardDiv(null, "blank")}
+          <div className="text-xl font-bold">
+            {secsLeft > 0 ? secsLeft : ""}
+          </div>
+        </div>
+      )}
 
-      {/* your board */}
+      {/* Your board */}
       <div className="player-board mt-6">
         <h3 className="text-center mb-2">{youName}</h3>
         <div className="board-grid grid grid-cols-5 gap-2 justify-center">
@@ -250,25 +246,28 @@ const GameBoard: React.FC = () => {
         </div>
       </div>
 
-      {/* exit button */}
-      <div className="flex justify-center mt-6">
-        <button className="btn btn-danger" onClick={exit}>
-          ❌ Exit
-        </button>
-      </div>
-
-      {/* winner / rematch banner */}
-      {winner && (
-        <div className="result-banner text-center mt-6">
-          {banner()}
-          {secsRematch > 0 && (
-            <p className="text-sm mt-2">Rematch starts in {secsRematch} s…</p>
-          )}
+      {/* Controls (hidden after game) */}
+      {!winner && (
+        <div className="game-controls flex justify-center space-x-4 mt-6">
+          <button className="btn btn-danger" onClick={exit}>
+            ❌ Exit
+          </button>
         </div>
       )}
 
-      {exitMsg && (
-        <p className="text-center text-red-600 text-lg mt-4">{exitMsg}</p>
+      {/* Central overlay banner at game end */}
+      {winner && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 text-center">
+          {banner}
+          {secsRematch > 0 && (
+            <p className="text-sm mt-2 text-white">
+              Rematch starts in {secsRematch} s…
+            </p>
+          )}
+          <button className="btn mt-4" onClick={exit}>
+            Back to Lobby
+          </button>
+        </div>
       )}
     </div>
   );

@@ -1,14 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { RootState } from "../store";
 import { socket } from "../socket";
 
-/* shape broadcast from backend */
 interface RoomInfo {
   id: string;
   name: string;
   ownerUserId: number;
+  ownerName: string;
   hasPassword: boolean;
   cost: number;
   occupants: number;
@@ -19,6 +19,13 @@ const GameRooms = () => {
   const { id: myDbId, username } = useSelector((s: RootState) => s.auth);
 
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
+
+  /* ---- filters ---- */
+  const [nameFilter, setNameFilter] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState("");
+  const [pwdFilter, setPwdFilter] = useState<"all" | "with" | "without">("all");
+
+  /* ---- room creation ---- */
   const [ownsRoom, setOwnsRoom] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({
@@ -28,7 +35,7 @@ const GameRooms = () => {
     hasPwd: false,
   });
 
-  /* ––––– socket listeners ––––– */
+  /* ---- sockets ---- */
   useEffect(() => {
     socket.emit("request-rooms");
 
@@ -48,7 +55,7 @@ const GameRooms = () => {
     };
   }, [myDbId, nav]);
 
-  /* ––––– helpers ––––– */
+  /* ---- helpers ---- */
   const createRoom = () => {
     socket.emit("create-room", {
       name: form.name || `${username}'s room`,
@@ -66,11 +73,26 @@ const GameRooms = () => {
 
   const cancelRoom = () => socket.emit("cancel-room");
 
-  /* ––––– UI ––––– */
+  /* ---- filter application ---- */
+  const filteredRooms = rooms.filter((r) => {
+    if (nameFilter && !r.name.toLowerCase().includes(nameFilter.toLowerCase()))
+      return false;
+    if (
+      ownerFilter &&
+      !r.ownerName.toLowerCase().includes(ownerFilter.toLowerCase())
+    )
+      return false;
+    if (pwdFilter === "with" && !r.hasPassword) return false;
+    if (pwdFilter === "without" && r.hasPassword) return false;
+    return true;
+  });
+
+  /* ---- UI ---- */
   return (
     <div className="lobby-wrapper">
       <h1 className="mb-4">Custom Rooms</h1>
 
+      {/* ---------------- create button ---------------- */}
       <button
         className="btn mb-4"
         onClick={() => setShowCreate(true)}
@@ -84,24 +106,58 @@ const GameRooms = () => {
         </p>
       )}
 
+      {/* ---------------- filters ---------------- */}
+      <div className="flex flex-wrap gap-4 mb-4">
+        <input
+          className="input"
+          placeholder="Room name…"
+          value={nameFilter}
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            setNameFilter(e.target.value)
+          }
+        />
+        <input
+          className="input"
+          placeholder="Owner name…"
+          value={ownerFilter}
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            setOwnerFilter(e.target.value)
+          }
+        />
+        <select
+          className="input"
+          value={pwdFilter}
+          onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+            setPwdFilter(e.target.value as any)
+          }
+        >
+          <option value="all">All rooms</option>
+          <option value="with">Password-protected</option>
+          <option value="without">No password</option>
+        </select>
+      </div>
+
+      {/* ---------------- table ---------------- */}
       <table className="w-full text-left">
         <thead>
           <tr>
             <th>Name</th>
+            <th>Owner</th>
             <th>Cost</th>
             <th>Players</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
-          {rooms.length === 0 && (
+          {filteredRooms.length === 0 && (
             <tr>
-              <td colSpan={4}>No rooms yet</td>
+              <td colSpan={5}>No rooms match your filters</td>
             </tr>
           )}
-          {rooms.map((r) => (
+          {filteredRooms.map((r) => (
             <tr key={r.id}>
               <td>{r.name}</td>
+              <td>{r.ownerName}</td>
               <td>{r.cost}</td>
               <td>{r.occupants}/2</td>
               <td>
@@ -123,7 +179,7 @@ const GameRooms = () => {
         </tbody>
       </table>
 
-      {/* overlay */}
+      {/* ---------------- overlay ---------------- */}
       {showCreate && (
         <div className="overlay">
           <div className="modal p-4 bg-white rounded shadow">
